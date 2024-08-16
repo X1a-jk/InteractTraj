@@ -1,0 +1,54 @@
+Query: the scene is very sparse, the ego car moves forward, most cars are moving in fast speed
+
+Output:
+Summary: Most vehicles including ego vehicle (V1) moves forward at a high speed(more than 6) in a sparse traffic scenario. Due to the sparse nature of the scenario, there should be few vehicles around the ego vehicle and they should be at larger distances. We generate 3 vehicles in the scene on a 8-lane two-way road with an intersection in front. The ego car is placed on the middle lane.
+Explanation:
+- V1 (ego vehicle) is in the center and moves forward. Because V1 moves fast, its speed is set to 8 (fast speed). During the process, V1 maintains a constant speed in a straight line at all times during the process, so all remaining speed levels are set to 6. Since V1 is driving in the straight lane, its trajectory class is set to 1.
+- V2 is at a far distance (index 3) and moves with a fast speed (index 5). It is in the back right of ego car (index 2) with the same direction as the ego vehicle (index 0). All remaining speed levels are set to 5. Since V2 is driving in a straight line, its trajectory class is set to 1.
+- V3 is at a farther distance (index 4) and also moves with a fast speed (index 5). It is in the front left of ego car (index 5) and has the same direction as the ego vehicle (index 0). All remaining speed levels are set to 5, and since V3 is driving in the straight lane,its trajectory class is set to 1.
+Map: Because the scenario is very sparse, this occurs in a 8-lane two-way road with a four-lane intersection ahead. The ego vehicle is in the middle lane with lane id 3. The intersection is 15 meters away, with index 3.
+Event:
+- E1 (ego car) is all zero since it's ego car.
+- E2: V2 is in the back right at the begining and drives slower than ego car, so it remains in the back right with respect to ego car during the process. So the second vector is set to 2, representing the position "back_right". Since the scene is sparse, the relative is moderate between each vehicle and ego car. So the first vector is set to 3 for all the dimensions.
+- E3: V3 is in the front left of ego car , so all dimension of the vector is set to 5, representing the position "front_left". Since the scene is sparse, the relative is moderate between each vehicle and ego car. So the first vector is set to four since it is furtherer than V2.
+
+Actor Vector:
+- 'V1': [-1, 0, 0, 8, 8, 8, 8, 8, 8, 1]
+- 'V2': [5, 3, 0, 5, 5, 5, 5, 5, 5, 1]
+- 'V3': [2, 4, 0, 5, 5, 5, 5, 5, 5, 1]
+Map Vector:
+- 'Map': [4, 4, 2, 2, 3, 3]
+Event Vector:
+- 'E1': [0, 0, 0, 0, 0] | [0, 0, 0, 0, 0]
+- 'E2': [3, 3, 3, 3, 3] | [2, 2, 2, 2, 2]
+- 'E3': [4, 4, 4, 4, 4] | [5, 5, 5, 5, 5]
+
+
+Query: The scene is with medium density. There are some cars at the intersection. The ego car is turning left, while some of the cars are turing right.
+
+Output:
+Summary: We generate 3 vehicles in the scene on a four-lane two-way road with an intersection. Since ego car is turning left, the ego car is placed on the left-most lane. Since the scene is with medium density, all the cars are driving at a relative midium speed.
+Explanation:
+- V1 (ego vehicle) is in the center and is making a left turn. Before starting the turn his speed level is set to 5, during the turn he needs to decelerate, at which point the speed level is set to 3. The overall speed trend is expressed as [4, 4, 3, 2, 1] to show the deceleration, and the trajectory type is 2, representing a left-turn.
+- V2 is moving in the same direction as the ego vehicle (index 0). Because the ego car is turning left on the left-most lane, V2 should locate in the back right (index 2) of the ego vehicle. Since V2 deccelarates and finally stops at the intersection, so its trajectory type should be represent its behavior before stopping, and we set the trajectory type of V2 as 1 istead of being 0, which means a stop. and all the speeds during the trajectory is decelerating. We set the distance to be 0 since the cars are close to each other. 
+- V3 is turninging right in the opposite direction of the ego vehicle (index 1), therefore it is on the left side of ego vehicle and driving towrads ego car, locating in the front left of the ego vehicle. It in the opposite direction as the ego vehicle (index 1). Since it is turning right, its trajectory type is set to 3. Since it's driving at low speed and decelerating, we set its speed as [4, 2, 2, 1, 1].
+- Map: Given the medium density and the presence of vehicles behind the ego vehicle, we assume this happens on a 4-lane two-way road. The ego vehicle is in the second lane from the right, with lane id 2. There is an intersection nearby, indicated by 4 since ego car is going to turn left.
+- Event: E1 is composed of two all-zero vectors, V2 is located in the back right(index 2) during the while V1 is making a left-turn. At first V2 was on the right side of the ego car, and after ego car has made the left turn, he would be on the left side of ego car relatively. As V2 stops at the intersection, the distance between V2 and ego car will be all zero since it's close to ego car. V3 is in the opposite direction of the ego vehicle, so at first it in front left (index 5) of ego car, and at last they will be driving in the same direction with V3 on the righter lane, it will be in back right(index 2) with respect to ego car. Its relative distance to V1 will be increasing.
+
+
+Actor Vector:
+- 'V1': [-1, 0, 0, 5, 4, 4, 3, 2, 1, 2]
+- 'V2': [2, 0, 0, 2, 2, 1, 0, 0, 0, 1]
+- 'V3': [5, 4, 1, 4, 4, 2, 2, 1, 1, 3]
+Map Vector:
+- 'Map': [2, 2, 0, 0, 4, 2]
+Event Vector:
+- 'E1': [0, 0, 0, 0, 0] | [0, 0, 0, 0, 0]
+- 'E2': [0, 0, 0, 0, 0] | [2, 2, 3, 3, 4]
+- 'E3': [1, 1, 2, 2, 3] | [5, 5, 4, 4, 2]
+
+
+
+Query: INSERT_QUERY_HERE
+
+Output:

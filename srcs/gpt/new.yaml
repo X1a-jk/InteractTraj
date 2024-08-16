@@ -1,0 +1,9 @@
+EXPERIMENT_NAME: 'new representation'
+
+LLM:
+  CODEX:
+    MODEL: 'gpt-4'
+    # MODEL: 'mistral'
+    PROMPT_FILE: 'que_traj_type.prompt'
+    SYS_PROMPT_FILE: 'sys_traj_type.prompt'
+    TEMPERATURE: 0.0
