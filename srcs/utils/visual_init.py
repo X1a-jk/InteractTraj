@@ -175,9 +175,11 @@ def draw_seq(t, center, agents, traj=None, other=None, heat_map=False, save_np=F
                 x1, y1 = traj_i[j + 1]
                 
                 # only partial
+                '''
                 if j > t:
                     continue
-                
+                '''
+
                 if abs(x0) < 100 and abs(y0) < 100 and abs(x1) < 100 and abs(y1) < 100:
                     ax.plot((x0, x1), (y0, y1), '-', color=col, linewidth=4.0, marker='.', markersize=10)
                 

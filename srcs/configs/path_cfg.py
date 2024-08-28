@@ -19,7 +19,8 @@ _C.DATASET.TEXT = CN()
 
 _C.ROOT_DIR = '..'
 _C.DATASET.DATA_LIST.ROOT = '/home/ubuntu/xiajunkai/InteractTraj/srcs/utils/trainval'
-_C.DATASET.DATA_PATH = '/home/ubuntu/DATA1/waymo'
+_C.DATASET.DATA_PATH = '/home/ubuntu/DATA2/nuplan/' #'/home/ubuntu/DATA1/waymo'
+#_C.DATASET.DATA_PATH = '/home/ubuntu/DATA1/waymo/'
 _C.SAVE_DIR = 'results'
 
 _C.LOGGER = 'wandb'# _C.LOGGER = 'tsboard'

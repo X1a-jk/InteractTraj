@@ -1,9 +1,10 @@
 SEED: 0
-SAVE_CHECKPOINT: false #true
+SAVE_CHECKPOINT: true
 DATASET:
   CACHE: False
   ENABLE_OUT_RANGE_TRAJ: True
-  TYPE: WaymoOpenMotion
+    #TYPE: WaymoOpenMotion
+  TYPE: Nuplan 
   MAX_TIME_STEP: 50
   TIME_SAMPLE_GAP: 1
   AUGMENTATION:
@@ -87,7 +88,8 @@ MODEL:
     PRED_MODE: mlp_gmm
     CLS_WEIGHT: 0.1
     K: 6
-    PRED_HEADING_VEL: true
+    PRED_HEADING_VEL: true #false
+    MULTI_TYPE: true
 
   PREDICT_EGO: true
   SCENE:
@@ -105,7 +107,7 @@ MODEL:
         NLAYER: 1
         QUERY_NUM: 32
         TYPE: agent_decode
-        ATTR_GMM_ENABLE: True
+        ATTR_GMM_ENABLE: False
         ATTR_GMM_K: 5
   
       ATTR_QUERY:
@@ -131,19 +133,18 @@ MODEL:
     output_vel: true
     cumsum_vel: true    
 
-
-
 LOAD_CHECKPOINT_MODEL: false
-LOAD_CHECKPOINT_PATH: #/home/ubuntu/DATA2/nuplan/results/lctgen/train/lctgen_attr_ind_motion/5fv1o13a/checkpoints/last.ckpt
+LOAD_CHECKPOINT_PATH: /home/ubuntu/xiajunkai/InteractTraj/results/InteractTraj/train/train/ecju5sau/checkpoints/epoch=49-step=27350.ckpt
 LOAD_CHECKPOINT_TRAINER: false
 
+
 TEST:
-  BATCH_SIZE: 32
+  BATCH_SIZE: 64
   SHUFFLE: false
   NUM_WORKERS: 4
 TRAIN:
-  BATCH_SIZE: 16
-  LR: 0.00003
+  BATCH_SIZE: 64
+  LR: 0.0003
   SHUFFLE: false
   OPTIMIZER: AdamW
   SCHEDULER:
@@ -155,9 +156,9 @@ TRAIN:
     - 90
   NUM_WORKERS: 4
 VAL:
-  BATCH_SIZE: 32
+  BATCH_SIZE: 64
   SHUFFLE: false
   NUM_WORKERS: 4
-VAL_INTERVAL: 10
-VIS_INTERVAL: 10
+VAL_INTERVAL: 25
+VIS_INTERVAL: 25
 WANDB_PROJ: train

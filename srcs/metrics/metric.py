@@ -243,7 +243,8 @@ class TrajMatch(Metric):
         real_traj = data['traj'][i][:, data['agent_mask'][i]][:, real_idx][1:].cpu()
         sim_traj = torch.tensor(model_output_scene[i]['rel_traj'][:, sim_idx][1:]).cpu()
 
-        real_type = data['traj_type'][i][data['agent_mask'][i]][real_idx].cpu().item()
+        # real_type = data['traj_type'][i][data['agent_mask'][i]][real_idx].cpu().item()
+        real_type = data['veh_type'][i][data['agent_mask'][i]][real_idx].cpu().item()
         real_mask = motion_mask[:, real_idx][1:].cpu()
 
         if not real_mask.any():

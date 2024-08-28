@@ -49,6 +49,8 @@ class SetCriterion(nn.Module):
         self.eos_coef = eos_coef
         self.losses = losses
 
+        self.with_type_embedding = cfg.MODEL.MOTION.MULTI_TYPE 
+
         self.use_center_mask = use_center_mask
         self.cfg = cfg
         
@@ -142,7 +144,7 @@ class SetCriterion(nn.Module):
 
         return [degree_pos_rel, ang]
     
-    def _compute_motion_loss(self, src_motion, src_probs, target_motion, target_motion_mask, loss_func, motion_attrs, traj_type, gt_pos_f, gt_pos_i, pos_attrs, gt_type_pos):
+    def _compute_motion_loss(self, src_motion, src_probs, target_motion, target_motion_mask, loss_func, motion_attrs, traj_type, gt_pos_f, gt_pos_i, pos_attrs, gt_type_pos, veh_type = None):
         pred_other_attr = self.motion_cfg.PRED_HEADING_VEL
         type_frequency = [0.42, 0.50, 0.02, 0.02, 0.02, 0.02] 
         weight_frequency = [1.0 / t for t in type_frequency]
@@ -158,125 +160,265 @@ class SetCriterion(nn.Module):
 
         if src_probs is None:
             src_probs = [None] * len(src_motion)
-        b_idx = 0
-        for src, src_prob, tgt, mask, traj, pos_f, pos_i, pos_0, gt_tp in zip(src_motion, src_probs, target_motion, target_motion_mask, traj_type, gt_pos_f, gt_pos_i, pos_attrs, gt_type_pos):
-            if self.motion_cfg.PRED_MODE == 'mlp':
-                if tgt.shape[0] > 0 and mask.shape[0] > 0:
-                    loss_attr.append(loss_func(src[mask], tgt[mask]))
-                else:
-                    loss_attr.append([])
-            elif self.motion_cfg.PRED_MODE in ['mlp_gmm', 'mtf']:
-                if tgt.shape[0] > 0 and mask.shape[0] > 0:
-                    K = src.shape[1]
-                    tgt_gt = tgt.unsqueeze(1).repeat(1, K, 1, 1)
+        
+        if veh_type is None:
+            b_idx = 0
+            for src, src_prob, tgt, mask, traj, pos_f, pos_i, pos_0, gt_tp in zip(src_motion, src_probs, target_motion, target_motion_mask, traj_type, gt_pos_f, gt_pos_i, pos_attrs, gt_type_pos):
+                if self.motion_cfg.PRED_MODE == 'mlp':
+                    if tgt.shape[0] > 0 and mask.shape[0] > 0:
+                        loss_attr.append(loss_func(src[mask], tgt[mask]))
+                    else:
+                        loss_attr.append([])
+                elif self.motion_cfg.PRED_MODE in ['mlp_gmm', 'mtf']:
+                    if tgt.shape[0] > 0 and mask.shape[0] > 0:
+                        K = src.shape[1]
+                        tgt_gt = tgt.unsqueeze(1).repeat(1, K, 1, 1)
 
-                    dists = []
-                    for i in range(len(src)):
-                        tgt_gt_i = tgt_gt[i]
-                        src_i = src[i]
-                        mask_i = mask[i][:, 0]
-                        # get the last idx of mask_i that is 1
-                        last_idx = torch.where(mask_i)[0]
-                        if len(last_idx) == 0:
-                            dists.append(torch.zeros(K, device=src_i.device))
-                            continue
-                        last_idx = last_idx[-1]
-                        tgt_end = tgt_gt_i[:, last_idx]
-                        src_end = src_i[:, last_idx]
-                        dist = MSE(tgt_end, src_end).mean(-1)
-                        dists.append(dist)
-                    dists = torch.stack(dists, dim=0)
-                    min_index = torch.argmin(dists, dim=-1)
-                    pos_ego = src[0, min_index[0], -1, :]
-                    pos_ego_init = src[0, min_index[0], 0, :]
-                    init_pos_loss = []
-                    final_pos_loss = []
-                    type_pos_loss = []
-                    for i in range(len(src)):
-                        idx_traj = min_index[i]
-                        pos_veh = src[i, idx_traj, -1, :]
-                        pos_veh_init = src[i, idx_traj, 0, :]
-                        dist_veh = torch.sqrt((pos_veh[0] - pos_ego[0])**2 + (pos_veh[1] - pos_ego[1])**2)
-                        dist_veh_init = torch.sqrt((pos_veh_init[0] - pos_ego_init[0])**2 + (pos_veh_init[1] - pos_ego_init[1])**2)
-                        loss_veh = MSE(dist_veh, pos_f[i])
-                        loss_veh_init = MSE(dist_veh_init, pos_i[i])
+                        dists = []
+                        for i in range(len(src)):
+                            tgt_gt_i = tgt_gt[i]
+                            src_i = src[i]
+                            mask_i = mask[i][:, 0]
+                            # get the last idx of mask_i that is 1
+                            last_idx = torch.where(mask_i)[0]
+                            if len(last_idx) == 0:
+                                dists.append(torch.zeros(K, device=src_i.device))
+                                continue
+                            last_idx = last_idx[-1]
+                            tgt_end = tgt_gt_i[:, last_idx]
+                            src_end = src_i[:, last_idx]
+                            dist = MSE(tgt_end, src_end).mean(-1)
+                            dists.append(dist)
+                        dists = torch.stack(dists, dim=0)
+                        min_index = traj.flatten()
 
-                        type_pos = self.pos_rel(0.0, pos_ego, pos_veh)[1]
-                        type_pos = torch.tensor(type_pos, dtype=torch.int64).to(gt_tp[i].device)
-                        type_pos = type_pos.view((-1,1))
-                        gt_tp[i] = torch.tensor(gt_tp[i], dtype=torch.int64).view((-1,1))
-                        loss_pos_type = MSE(type_pos, gt_tp[i])
+                        pos_ego = src[0, min_index[0], -1, :]
+                        pos_ego_init = src[0, min_index[0], 0, :]
+                        init_pos_loss = []
+                        final_pos_loss = []
+                        type_pos_loss = []
+                        for i in range(len(src)):
+                            idx_traj = min_index[i]
+                            pos_veh = src[i, idx_traj, -1, :]
+                            pos_veh_init = src[i, idx_traj, 0, :]
+                            dist_veh = torch.sqrt((pos_veh[0] - pos_ego[0])**2 + (pos_veh[1] - pos_ego[1])**2)
+                            dist_veh_init = torch.sqrt((pos_veh_init[0] - pos_ego_init[0])**2 + (pos_veh_init[1] - pos_ego_init[1])**2)
+                            loss_veh = MSE(dist_veh, pos_f[i])
+                            loss_veh_init = MSE(dist_veh_init, pos_i[i])
 
-                        final_pos_loss.append(loss_veh)
-                        init_pos_loss.append(loss_veh_init)
-                        type_pos_loss.append(loss_pos_type)
-                    
-                    k_mask = mask.unsqueeze(1).repeat(1, K, 1, 1)
-                    
-                    pos_loss = MSE(tgt_gt, src)
-                    pos_loss[~k_mask] *= 0
+                            type_pos = self.pos_rel(0.0, pos_ego, pos_veh)[1]
+                            type_pos = torch.tensor(type_pos, dtype=torch.int64).to(gt_tp[i].device)
+                            type_pos = type_pos.view((-1,1))
+                            gt_tp[i] = torch.tensor(gt_tp[i], dtype=torch.int64).view((-1,1))
+                            loss_pos_type = MSE(type_pos, gt_tp[i])
 
-                    final_pos_loss = torch.tensor(final_pos_loss).to(pos_loss.device)
-                    init_pos_loss = torch.tensor(init_pos_loss).to(pos_loss.device)
-                    type_pos_loss = torch.tensor(type_pos_loss).to(pos_loss.device)
-                    pos_loss = pos_loss.sum(-1).sum(-1) / (k_mask.sum(-1).sum(-1) + 1e-6)
-
-                    for rel_idx in range(pos_loss.shape[0]):
-                        rel_type = traj[rel_idx, 0].cpu().int()
-                        pos_loss[rel_idx, rel_type] *= weight_frequency[rel_type]
-                        final_pos_loss[rel_idx] *= weight_frequency[rel_type]
-                        init_pos_loss[rel_idx] *= weight_frequency[rel_type]
-
-                    pos_loss = torch.gather(pos_loss, dim=1, index=min_index.unsqueeze(-1)).mean()
-                    final_pos_loss = final_pos_loss.mean() * 0.05
-                    init_pos_loss = init_pos_loss.mean() * 0.01
-                    type_pos_loss = type_pos_loss.mean() * 0.01
-                    pos_loss *= 0.05
-                    cls_loss = CLS(src_prob, min_index) * self.motion_cfg.CLS_WEIGHT
-                    cls_loss *= 0.05
-                    motion_loss = pos_loss + cls_loss + final_pos_loss + pos_loss # + init_pos_loss
-                    motion_attr_loss['motion_pos'].append(pos_loss + cls_loss + final_pos_loss + pos_loss) # + init_pos_loss) 
-
-                    if pred_other_attr:
-                        src_heading = motion_attrs['heading']['src'][b_idx]
-                        src_vel = motion_attrs['vel']['src'][b_idx]
-                        tgt_heading = motion_attrs['heading']['tgt'][b_idx][:, None, :, None].repeat(1, K, 1, 1)
-                        tgt_vel = motion_attrs['vel']['tgt'][b_idx][:, None].repeat(1, K, 1, 1)
-
-                        velo_loss = MSE(tgt_vel, src_vel)
-                        velo_loss[~k_mask] *= 0
-                        velo_loss = velo_loss.sum(-1).sum(-1) / (k_mask.sum(-1).sum(-1) + 1e-6)
+                            final_pos_loss.append(loss_veh)
+                            init_pos_loss.append(loss_veh_init)
+                            type_pos_loss.append(loss_pos_type)
                         
-                        for rel_idx in range(velo_loss.shape[0]):
+                        k_mask = mask.unsqueeze(1).repeat(1, K, 1, 1)
+                        
+                        pos_loss = MSE(tgt_gt, src)
+                        pos_loss[~k_mask] *= 0
+
+                        final_pos_loss = torch.tensor(final_pos_loss).to(pos_loss.device)
+                        init_pos_loss = torch.tensor(init_pos_loss).to(pos_loss.device)
+                        type_pos_loss = torch.tensor(type_pos_loss).to(pos_loss.device)
+                        pos_loss = pos_loss.sum(-1).sum(-1) / (k_mask.sum(-1).sum(-1) + 1e-6)
+
+                        for rel_idx in range(pos_loss.shape[0]):
                             rel_type = traj[rel_idx, 0].cpu().int()
-                            velo_loss[rel_idx, rel_type] *= weight_frequency[rel_type]
+                            pos_loss[rel_idx, rel_type] *= weight_frequency[rel_type]
+                            final_pos_loss[rel_idx] *= weight_frequency[rel_type]
+                            init_pos_loss[rel_idx] *= weight_frequency[rel_type]
+
+                        pos_loss = torch.gather(pos_loss, dim=1, index=min_index.unsqueeze(-1)).mean()
+                        final_pos_loss = final_pos_loss.mean() * 1.0
+                        init_pos_loss = init_pos_loss.mean() * 0.01
+                        type_pos_loss = type_pos_loss.mean() * 0.01
+                        pos_loss *= 2.0
+                        cls_loss = CLS(src_prob, min_index) * self.motion_cfg.CLS_WEIGHT
+                        cls_loss *= 1.0
                         
-                        velo_loss = torch.gather(velo_loss, dim=1, index=min_index.unsqueeze(-1)).mean()
-                        velo_loss *= 0.1
-                        heading_loss = L1(tgt_heading, src_heading)
-                        heading_loss[~k_mask[...,:1]] *= 0
-                        heading_loss = heading_loss.sum(-1).sum(-1) / (k_mask[...,:1].sum(-1).sum(-1) + 1e-6)
+                        motion_loss = pos_loss + cls_loss + final_pos_loss + pos_loss # + init_pos_loss
+                        motion_attr_loss['motion_pos'].append(pos_loss + cls_loss + final_pos_loss + pos_loss) # + init_pos_loss) 
+
+                        if pred_other_attr:
+                            src_heading = motion_attrs['heading']['src'][b_idx]
+                            src_vel = motion_attrs['vel']['src'][b_idx]
+                            tgt_heading = motion_attrs['heading']['tgt'][b_idx][:, None, :, None].repeat(1, K, 1, 1)
+                            tgt_vel = motion_attrs['vel']['tgt'][b_idx][:, None].repeat(1, K, 1, 1)
+
+                            velo_loss = MSE(tgt_vel, src_vel)
+                            velo_loss[~k_mask] *= 0
+                            velo_loss = velo_loss.sum(-1).sum(-1) / (k_mask.sum(-1).sum(-1) + 1e-6)
+                            
+                            for rel_idx in range(velo_loss.shape[0]):
+                                rel_type = traj[rel_idx, 0].cpu().int()
+                                velo_loss[rel_idx, rel_type] *= weight_frequency[rel_type]
+                            
+                            velo_loss = torch.gather(velo_loss, dim=1, index=min_index.unsqueeze(-1)).mean()
+                            velo_loss *= 0.1
+                            heading_loss = L1(tgt_heading, src_heading)
+                            heading_loss[~k_mask[...,:1]] *= 0
+                            heading_loss = heading_loss.sum(-1).sum(-1) / (k_mask[...,:1].sum(-1).sum(-1) + 1e-6)
+                            
+                            for rel_idx in range(heading_loss.shape[0]):
+                                rel_type = traj[rel_idx, 0].cpu().int()
+                                heading_loss[rel_idx, rel_type] *= weight_frequency[rel_type]
+                            
+                            heading_loss = torch.gather(heading_loss, dim=1, index=min_index.unsqueeze(-1)).mean()
                         
-                        for rel_idx in range(heading_loss.shape[0]):
-                            rel_type = traj[rel_idx, 0].cpu().int()
-                            heading_loss[rel_idx, rel_type] *= weight_frequency[rel_type]
-                        
-                        heading_loss = torch.gather(heading_loss, dim=1, index=min_index.unsqueeze(-1)).mean()
+                            motion_loss += velo_loss + heading_loss * 10.0
+
+                            motion_attr_loss['motion_vel'].append(velo_loss)
+                            motion_attr_loss['motion_heading'].append(heading_loss * 10.0)
+
+                        loss_attr.append(motion_loss)
+                    else:
+                        loss_attr.append([])
+                        motion_attr_loss['motion_pos'].append([])
+                        if pred_other_attr:
+                            motion_attr_loss['motion_vel'].append([])
+                            motion_attr_loss['motion_heading'].append([])
+                b_idx += 1
+        else:
+            b_idx = 0
+            for src, src_prob, tgt, mask, traj, pos_f, pos_i, pos_0, gt_tp, vt in zip(src_motion, src_probs, target_motion, target_motion_mask, traj_type, gt_pos_f, gt_pos_i, pos_attrs, gt_type_pos, veh_type):
+                if self.motion_cfg.PRED_MODE == 'mlp':
+                    if tgt.shape[0] > 0 and mask.shape[0] > 0:
+                        loss_attr.append(loss_func(src[mask], tgt[mask]))
+                    else:
+                        loss_attr.append([])
+                elif self.motion_cfg.PRED_MODE in ['mlp_gmm', 'mtf']:
                     
-                        motion_loss += velo_loss + heading_loss * 10.0
+                    src_temp = []
+                    for j in range(src.shape[0]):
+                        src_temp.append(src[j, vt[j, 0].int()-1, :, :, :])
+                    src = torch.stack(src_temp, dim = 0)
 
-                        motion_attr_loss['motion_vel'].append(velo_loss)
-                        motion_attr_loss['motion_heading'].append(heading_loss * 10.0)
+                    if tgt.shape[0] > 0 and mask.shape[0] > 0:                        
+                        K = src.shape[1]
+                        tgt_gt = tgt.unsqueeze(1).repeat(1, K, 1, 1)
 
-                    loss_attr.append(motion_loss)
-                else:
-                    loss_attr.append([])
-                    motion_attr_loss['motion_pos'].append([])
-                    if pred_other_attr:
-                        motion_attr_loss['motion_vel'].append([])
-                        motion_attr_loss['motion_heading'].append([])
-            
-            b_idx += 1
+                        dists = []
+                        for i in range(len(src)):
+                            tgt_gt_i = tgt_gt[i]
+                            src_i = src[i]
+                            mask_i = mask[i][:, 0]
+                            # get the last idx of mask_i that is 1
+                            last_idx = torch.where(mask_i)[0]
+                            if len(last_idx) == 0:
+                                dists.append(torch.zeros(K, device=src_i.device))
+                                continue
+                            last_idx = last_idx[-1]
+                            tgt_end = tgt_gt_i[:, last_idx]
+                            src_end = src_i[:, last_idx]
+                            dist = MSE(tgt_end, src_end).mean(-1)
+                            dists.append(dist)
+                        dists = torch.stack(dists, dim=0)
+                        min_index = traj.flatten()
+                        pos_ego = src[0, min_index[0], -1, :]
+                        pos_ego_init = src[0, min_index[0], 0, :]
+                        init_pos_loss = []
+                        final_pos_loss = []
+                        type_pos_loss = []
+                        for i in range(len(src)):
+                            idx_traj = min_index[i]
+                            pos_veh = src[i, idx_traj, -1, :]
+                            pos_veh_init = src[i, idx_traj, 0, :]
+                            dist_veh = torch.sqrt((pos_veh[0] - pos_ego[0])**2 + (pos_veh[1] - pos_ego[1])**2)
+                            dist_veh_init = torch.sqrt((pos_veh_init[0] - pos_ego_init[0])**2 + (pos_veh_init[1] - pos_ego_init[1])**2)
+                            loss_veh = MSE(dist_veh, pos_f[i])
+                            loss_veh_init = MSE(dist_veh_init, pos_i[i])
+
+                            type_pos = self.pos_rel(0.0, pos_ego, pos_veh)[1]
+                            type_pos = torch.tensor(type_pos, dtype=torch.int64).to(gt_tp[i].device)
+                            type_pos = type_pos.view((-1,1))
+                            gt_tp[i] = torch.tensor(gt_tp[i], dtype=torch.int64).view((-1,1))
+                            loss_pos_type = MSE(type_pos, gt_tp[i])
+
+                            final_pos_loss.append(loss_veh)
+                            init_pos_loss.append(loss_veh_init)
+                            type_pos_loss.append(loss_pos_type)
+                        
+                        k_mask = mask.unsqueeze(1).repeat(1, K, 1, 1)
+                        
+                        pos_loss = MSE(tgt_gt, src)
+                        pos_loss[~k_mask] *= 0
+
+                        final_pos_loss = torch.tensor(final_pos_loss).to(pos_loss.device)
+                        init_pos_loss = torch.tensor(init_pos_loss).to(pos_loss.device)
+                        type_pos_loss = torch.tensor(type_pos_loss).to(pos_loss.device)
+                        pos_loss = pos_loss.sum(-1).sum(-1) / (k_mask.sum(-1).sum(-1) + 1e-6)
+
+                        for rel_idx in range(pos_loss.shape[0]):
+                            rel_type = traj[rel_idx, 0].cpu().int()
+                            pos_loss[rel_idx, rel_type] *= weight_frequency[rel_type]
+                            final_pos_loss[rel_idx] *= weight_frequency[rel_type]
+                            init_pos_loss[rel_idx] *= weight_frequency[rel_type]
+
+                        pos_loss = torch.gather(pos_loss, dim=1, index=min_index.unsqueeze(-1)).mean()
+                        final_pos_loss = final_pos_loss.mean() * 0.05
+                        init_pos_loss = init_pos_loss.mean() * 0.01
+                        type_pos_loss = type_pos_loss.mean() * 0.01
+                        pos_loss *= 0.1
+                        cls_loss = CLS(src_prob, min_index) * self.motion_cfg.CLS_WEIGHT
+                        cls_loss *= 0.05
+                        motion_loss = pos_loss + cls_loss + final_pos_loss + pos_loss # + init_pos_loss
+                        motion_attr_loss['motion_pos'].append(pos_loss + cls_loss + final_pos_loss + pos_loss) # + init_pos_loss) 
+
+                        if pred_other_attr:
+                            src_heading = motion_attrs['heading']['src'][b_idx]
+                            src_vel = motion_attrs['vel']['src'][b_idx]
+                            tgt_heading = motion_attrs['heading']['tgt'][b_idx][:, None, :, None].repeat(1, K, 1, 1)
+                            tgt_vel = motion_attrs['vel']['tgt'][b_idx][:, None].repeat(1, K, 1, 1)
+                            
+                            heading_temp = []
+                            for j in range(src_heading.shape[0]):
+                                heading_temp.append(src_heading[j, vt[j, 0].int()-1, :, :, :])
+                            src_heading = torch.stack(heading_temp, dim = 0)
+ 
+                            
+                            vel_temp = []
+                            for j in range(src_vel.shape[0]):
+                                vel_temp.append(src_vel[j, vt[j, 0].int()-1, :, :, :])
+                            src_vel = torch.stack(vel_temp, dim = 0)
+
+                            
+                            velo_loss = MSE(tgt_vel, src_vel)
+                            velo_loss[~k_mask] *= 0
+                            velo_loss = velo_loss.sum(-1).sum(-1) / (k_mask.sum(-1).sum(-1) + 1e-6)
+                            
+                            for rel_idx in range(velo_loss.shape[0]):
+                                rel_type = traj[rel_idx, 0].cpu().int()
+                                velo_loss[rel_idx, rel_type] *= weight_frequency[rel_type]
+                            
+                            velo_loss = torch.gather(velo_loss, dim=1, index=min_index.unsqueeze(-1)).mean()
+                            velo_loss *= 0.1
+                            heading_loss = L1(tgt_heading, src_heading)
+                            heading_loss[~k_mask[...,:1]] *= 0
+                            heading_loss = heading_loss.sum(-1).sum(-1) / (k_mask[...,:1].sum(-1).sum(-1) + 1e-6)
+                            
+                            for rel_idx in range(heading_loss.shape[0]):
+                                rel_type = traj[rel_idx, 0].cpu().int()
+                                heading_loss[rel_idx, rel_type] *= weight_frequency[rel_type]
+                            
+                            heading_loss = torch.gather(heading_loss, dim=1, index=min_index.unsqueeze(-1)).mean()
+                        
+                            motion_loss += velo_loss + heading_loss * 10.0
+
+                            motion_attr_loss['motion_vel'].append(velo_loss)
+                            motion_attr_loss['motion_heading'].append(heading_loss * 10.0)
+
+                        loss_attr.append(motion_loss)
+                    else:
+                        loss_attr.append([])
+                        motion_attr_loss['motion_pos'].append([])
+                        if pred_other_attr:
+                            motion_attr_loss['motion_vel'].append([])
+                            motion_attr_loss['motion_heading'].append([])
+                b_idx += 1
 
         return loss_attr, motion_attr_loss
 
@@ -286,6 +428,9 @@ class SetCriterion(nn.Module):
         attributes = ['speed', 'pos', 'vel_heading', 'bbox', 'heading']
         targets = data['targets']
         traj_type = data['traj_type']
+
+        if self.with_type_embedding:
+            veh_type = data['veh_type']
         
         rel_pos_f = data['nei_pos_f']
         rel_pos_i = data['nei_pos_i']
@@ -324,10 +469,19 @@ class SetCriterion(nn.Module):
             else:
                 
                 src_attrs = [outputs[f'pred_{attr}'][i][indices[i][0]] for i in range(len(indices))]
-                pos_attrs = [outputs[f'pred_pos'].sample()[i,indices[i][0]] for i in range(len(indices))]
+                try:
+                    pos_attrs = [outputs[f'pred_pos'].sample()[i,indices[i][0]] for i in range(len(indices))]
+                except:
+                    pos_attrs = [outputs[f'pred_pos'][i][indices[i][0]] for i in range(len(indices))]
+
+
                 target_attrs = [targets[i][attr][indices[i][1]] for i in range(len(indices))]
-                gt_type = [traj_type[i][indices[i][0]] for i in range(len(indices))]
-                gt_pos_f = [rel_pos_f[i][indices[i][0]] for i in range(len(indices))]
+                gt_type = [traj_type[i][indices[i][1]] for i in range(len(indices))]
+                if self.with_type_embedding:
+                    gt_veh_type = [veh_type[i][indices[i][1]].int() - 1 for i in range(len(indices))]
+                else:
+                    gt_veh_type = None
+                gt_pos_f = [rel_pos_f[i][indices[i][1]] for i in range(len(indices))]
                 gt_pos_i = [rel_pos_i[i][indices[i][0]] for i in range(len(indices))]
                 
                 if attr == 'motion':
@@ -336,13 +490,14 @@ class SetCriterion(nn.Module):
                         src_probs = None
                     elif self.motion_cfg.PRED_MODE in ['mlp_gmm', 'mtf']:
                         src_probs = [outputs['motion_prob'][i][indices[i][0]] for i in range(len(indices))]
-                    
+ 
                     motion_attrs = {}
                     if self.motion_cfg.PRED_HEADING_VEL:
                         for k in ['vel', 'heading']:
                             motion_attrs[k] = {}
                             motion_attrs[k]['src'] = [outputs[f'pred_future_{k}'][i][indices[i][0]] for i in range(len(indices))]
                             motion_attrs[k]['tgt'] = [targets[i][f'future_{k}'][indices[i][1]] for i in range(len(indices))]
+ 
 
                 if len(target_attrs[0].shape) == 1:
                     target_attrs = [tgt.unsqueeze(1) for tgt in target_attrs]
@@ -353,7 +508,7 @@ class SetCriterion(nn.Module):
                     loss_func = MSE
 
                 if attr == 'motion':
-                    loss_attr, loss_motion = self._compute_motion_loss(src_attrs, src_probs, target_attrs, masks, loss_func, motion_attrs, gt_type, gt_pos_f, gt_pos_i, pos_attrs, gt_type_pos)
+                    loss_attr, loss_motion = self._compute_motion_loss(src_attrs, src_probs, target_attrs, masks, loss_func, motion_attrs, gt_type, gt_pos_f, gt_pos_i, pos_attrs, gt_type_pos, gt_veh_type)
                 else:
                     
                     loss_attr = [loss_func(src, tgt) if len(tgt) > 0 else [] for src, tgt in zip(src_attrs, target_attrs)]

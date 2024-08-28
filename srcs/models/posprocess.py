@@ -11,13 +11,14 @@ from srcs.utils.agent_process import WaymoAgent
 class PostProcess(nn.Module):
     def __init__(self, cfg) -> None:
       self.cfg = cfg
+      self.with_type_embedding = cfg.MODEL.MOTION.MULTI_TYPE
       self.use_background = cfg.LOSS.DETR.PRED_BACKGROUND
       self.remove_collision = cfg.MODEL.SCENE.REMOVE_COLLISION
       self.use_attr_gmm = cfg.MODEL.SCENE.INIT_CFG.DECODER.ATTR_GMM_ENABLE
       self.use_rel_heading = cfg.MODEL.USE_REL_HEADING
       super().__init__()
 
-    def _convert_motion_pred_to_traj(self, output, motion, motion_prob, heading, type_traj):
+    def _convert_motion_pred_to_traj(self, output, motion, motion_prob, heading, type_traj, veh_type = None):
       trajs = []
       rel_trajs = []
       for idx in range(len(output['agent'])):
@@ -25,8 +26,13 @@ class PostProcess(nn.Module):
         if self.cfg.MODEL.MOTION.PRED_MODE == 'mlp':
           a_motion = motion[idx]
         elif self.cfg.MODEL.MOTION.PRED_MODE in ['mlp_gmm', 'mtf']:
-          m_idx = type_traj[idx][0]
-          a_motion = motion[idx][m_idx]
+          if not veh_type is None:
+            m_idx = type_traj[idx][0]
+            v_idx = int(veh_type[idx][0]) - 1
+            a_motion = motion[idx][v_idx][m_idx]
+          else:
+            m_idx = type_traj[idx][0]
+            a_motion = motion[idx][m_idx]
         traj = a_motion
         rel_traj = np.concatenate([np.zeros((1, 2)), traj], axis=0)
         if self.cfg.DATASET.TRAJ_TYPE == 'xy_theta_relative':
@@ -49,23 +55,29 @@ class PostProcess(nn.Module):
         dis_b_f = min([(b[0]-traj_f[0])**2 + (b[1]-traj_f[1])**2 for b in bound])
         dis_c_f = min([(c[0]-traj_f[0])**2 + (c[1]-traj_f[1])**2 for c in center])
         if dis_b_f < dis_c_f:
-            exceed = True
-            break
+          exceed = True
+          break
         dis_b_i = min([(b[0]-traj_i[0])**2 + (b[1]-traj_i[1])**2 for b in bound])
         dis_c_i = min([(c[0]-traj_i[0])**2 + (c[1]-traj_i[1])**2 for c in center])
         if dis_b_i < dis_c_i:
-            exceed = True
-            break
+          exceed = True
+          break
 
       return exceed
 
-    def _convert_future_heading_pred(self, output, future_heading, future_vel, motion_prob, heading, type_traj):
+    def _convert_future_heading_pred(self, output, future_heading, future_vel, motion_prob, heading, type_traj, veh_type = None):
       headings = []
       vels = []
       for idx in range(len(output['agent'])):
-        m_idx = type_traj[idx][0]
-        a_heading = future_heading[idx][m_idx]
-        a_vel = future_vel[idx][m_idx]
+        if not veh_type is None:
+          m_idx = type_traj[idx][0]
+          v_idx = int(veh_type[idx][0]) - 1
+          a_heading = future_heading[idx][v_idx][m_idx]
+          a_vel = future_vel[idx][v_idx][m_idx]
+        else:
+          m_idx = type_traj[idx][0]
+          a_heading = future_heading[idx][m_idx]
+          a_vel = future_vel[idx][m_idx]
 
         a_heading = cal_rel_dir(a_heading, -heading[idx])[:, np.newaxis, :]
         a_vel = rotate(a_vel[..., 0], a_vel[..., 1], heading[idx])[:, np.newaxis, :]
@@ -176,13 +188,14 @@ class PostProcess(nn.Module):
           speed = torch.clip(preds['pred_speed'][i,query_idx].cpu(), min=0.0).squeeze(-1)
           vel_heading = preds['pred_vel_heading'][i,query_idx].cpu().squeeze(-1)
           if not self.use_attr_gmm:
-            pos = preds['pred_pos'][i,query_idx].cpu()
-            heading = preds['pred_heading'][i,query_idx].cpu().squeeze(-1)
-            bbox = torch.clip(preds['pred_bbox'][i,query_idx].cpu(), min=0.0)
+            pos = preds['pred_pos'][i,query_idx].cpu().squeeze(-2)
+            heading = preds['pred_heading'][i,query_idx].cpu().squeeze(-1).squeeze(-1)
+            bbox = torch.clip(preds['pred_bbox'][i,query_idx].cpu(), min=0.0).squeeze(-2)
           else:
             pos = preds['pred_pos'].sample()[i, query_idx].cpu()
             heading = torch.clip(preds['pred_heading'].sample()[i, query_idx].cpu(), min=-np.pi / 2, max=np.pi / 2)
             bbox = torch.clip(preds['pred_bbox'].sample()[i, query_idx].cpu(), min=0.1)
+
         all_agents = get_agent_pos_from_vec(vec, pos, speed, vel_heading, heading, bbox, self.use_rel_heading)
         agent_list = all_agents.get_list()
 
@@ -220,6 +233,8 @@ class PostProcess(nn.Module):
         output['agent_mask'] = torch.ones(len(output['agent']), dtype=torch.bool)
         output['probs'] = probs
         output['type_traj'] = preds['type_traj']
+        if self.with_type_embedding:
+          output['veh_type'] = preds['veh_type']
         
         if self.use_background:
           output['pred_logits'] = pred_logits[i, :, :-1].clone()
@@ -229,6 +244,11 @@ class PostProcess(nn.Module):
         if pred_motion:
           motion = preds['pred_motion'][i, query_idx].cpu().numpy()
           type_traj = preds['type_traj'][i, query_idx].cpu().numpy()
+          if self.with_type_embedding:
+            veh_type = preds['veh_type'][i, query_idx].cpu().numpy()
+          else:
+            veh_type = None
+
           if 'motion_prob' in preds:
             motion_prob = preds['motion_prob']
             if len(motion_prob.shape) == 2:
@@ -237,15 +257,17 @@ class PostProcess(nn.Module):
           else:
             motion_prob = None
           heading = np.concatenate([agent.heading for agent in agent_list])
-          output['traj'], output['rel_traj'] = self._convert_motion_pred_to_traj(output, motion, motion_prob, heading, type_traj)
-          # TODO: add postprocessing for future heading and velocity
-          exceed_bound = self._exceed_boundary(bound_i, center_i, output['traj'])
-          output['exceed'] = exceed_bound
+
           if 'pred_future_heading' in preds:
             future_heading = preds['pred_future_heading'][i, query_idx].cpu().numpy()
             future_vel = preds['pred_future_vel'][i, query_idx].cpu().numpy()
-            output['future_heading'], output['future_vel'] = self._convert_future_heading_pred(output, future_heading, future_vel, motion_prob, heading, type_traj)
-        
+            output['future_heading'], output['future_vel'] = self._convert_future_heading_pred(output, future_heading, future_vel, motion_prob, heading, type_traj, veh_type)
+            # print(f"{output['future_heading'].shape=}")
+
+          output['traj'], output['rel_traj'] = self._convert_motion_pred_to_traj(output, motion, motion_prob, heading, type_traj, veh_type)
+          # TODO: add postprocessing for future heading and velocity
+          exceed_bound = self._exceed_boundary(bound_i, center_i, output['traj'])
+          output['exceed'] = exceed_bound
         # add gt ego vehicle to the scene if not pred ego
         if not pred_ego:
           output['agent'] = [WaymoAgent(data['agent'][i][:1].cpu().numpy())] + output['agent']

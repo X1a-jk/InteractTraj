@@ -21,6 +21,8 @@ class DETRAgentQuery(nn.Module):
         self.hidden_dim = self.model_cfg['hidden_dim']
         self.motion_cfg = cfg.MODEL.MOTION
 
+        self.type_agents = 3
+
         self._init_encoder()
         self._init_decoder()
 
@@ -32,6 +34,8 @@ class DETRAgentQuery(nn.Module):
 
     def _init_decoder(self):
         mlp_dim = self.full_cfg.MODEL.SCENE.INIT_CFG.DECODER.MLP_DIM
+
+        self.with_type_embedding = self.motion_cfg.MULTI_TYPE # agent_type
 
         dcfg = self.model_cfg.DECODER
         self.dtype = dcfg.TYPE
@@ -47,13 +51,15 @@ class DETRAgentQuery(nn.Module):
         self.vel_heading_head = MLP([d_model, dcfg.MLP_DIM, 1])
 
         if self.use_attr_gmm:
-            self.pos_head = MLP([d_model, dcfg.MLP_DIM, self.attr_gmm_k*(1+5)])
-            self.bbox_head = MLP([d_model, dcfg.MLP_DIM, self.attr_gmm_k*(1+5)])
-            self.heading_head = MLP([d_model, dcfg.MLP_DIM, self.attr_gmm_k*(1+2)])
+            if self.with_type_embedding:
+                self.pos_head = MLP([d_model, dcfg.MLP_DIM, self.type_agents * self.attr_gmm_k*(1+5)])
+                self.bbox_head = MLP([d_model, dcfg.MLP_DIM, self.type_agents * self.attr_gmm_k*(1+5)])
+                self.heading_head = MLP([d_model, dcfg.MLP_DIM, self.type_agents * self.attr_gmm_k*(1+2)])
         else:
-            self.pos_head = MLP([d_model, dcfg.MLP_DIM, 2])
-            self.bbox_head = MLP([d_model, dcfg.MLP_DIM, 2])
-            self.heading_head = MLP([d_model, dcfg.MLP_DIM, 1])
+            if self.with_type_embedding:
+                self.pos_head = MLP([d_model, dcfg.MLP_DIM, self.type_agents * 2])
+                self.bbox_head = MLP([d_model, dcfg.MLP_DIM, self.type_agents * 2])
+                self.heading_head = MLP([d_model, dcfg.MLP_DIM, self.type_agents * 1])
 
         if self.use_background:
             self.background_head = MLP([d_model, dcfg.MLP_DIM, 1])
@@ -62,15 +68,32 @@ class DETRAgentQuery(nn.Module):
             self._init_motion_decoder(d_model, dcfg)
 
         query_dim = self.model_cfg.ATTR_QUERY.POS_ENCODING_DIM
-        self.query_embedding_layer = nn.Sequential(
-            nn.Linear(query_dim, d_model),
-            nn.ReLU(),
-            nn.Linear(d_model, d_model),
-        )
+
+        if not self.with_type_embedding:
+            self.query_embedding_layer = nn.Sequential(
+                nn.Linear(query_dim, d_model),
+                nn.ReLU(),
+                nn.Linear(d_model, d_model),
+            )
+        else:
+            self.query_embedding_layer = nn.Sequential(
+                nn.Linear(query_dim, d_model),
+                nn.ReLU(),
+                nn.Linear(d_model, d_model // 2),
+            )
+            
+
+            self.agent_type_embedding = nn.Sequential(
+                nn.Linear(1, d_model),
+                nn.ReLU(),
+                nn.Linear(d_model, d_model // 2),
+            )
+            
  
         self.query_mask_head = MLP([d_model, mlp_dim*2, mlp_dim])
         self.memory_mask_head = MLP([d_model, mlp_dim*2, mlp_dim])
 
+        
         #neighbor
         self.head = 8
         nei_decoder_layer = nn.TransformerDecoderLayer(**layer_cfg)
@@ -85,16 +108,25 @@ class DETRAgentQuery(nn.Module):
         
         self.neighbor_txt_embedding = PositionalEncoding(d_model)
         
+
     def _init_motion_decoder(self, d_model, dcfg):
         self.m_K = self.motion_cfg.K
         self.m_dim = 2 * self.motion_cfg.STEP
 
-        self.motion_prob_head = MLP([d_model, dcfg.MLP_DIM, dcfg.MLP_DIM // 2, self.m_K])
-        self.motion_head = MLP([d_model, dcfg.MLP_DIM, dcfg.MLP_DIM // 2, self.m_K * self.m_dim])
+        if self.with_type_embedding:
+            self.motion_prob_head = MLP([d_model, dcfg.MLP_DIM, dcfg.MLP_DIM // 2, self.type_agents * self.m_K])
+            self.motion_head = MLP([d_model, dcfg.MLP_DIM, dcfg.MLP_DIM // 2, self.type_agents * self.m_K * self.m_dim])
 
-        if self.motion_cfg.PRED_HEADING_VEL:
-            self.angle_head = MLP([d_model, dcfg.MLP_DIM, dcfg.MLP_DIM // 2, self.m_K * self.motion_cfg.STEP])
-            self.vel_head = MLP([d_model, dcfg.MLP_DIM, dcfg.MLP_DIM // 2, self.m_K * self.m_dim])
+            if self.motion_cfg.PRED_HEADING_VEL:
+                self.angle_head = MLP([d_model, dcfg.MLP_DIM, dcfg.MLP_DIM // 2, self.type_agents * self.m_K * self.motion_cfg.STEP])
+                self.vel_head = MLP([d_model, dcfg.MLP_DIM, dcfg.MLP_DIM // 2, self.type_agents * self.m_K * self.m_dim])
+        else:
+            self.motion_prob_head = MLP([d_model, dcfg.MLP_DIM, dcfg.MLP_DIM // 2, self.m_K])
+            self.motion_head = MLP([d_model, dcfg.MLP_DIM, dcfg.MLP_DIM // 2, self.m_K * self.m_dim])
+
+            if self.motion_cfg.PRED_HEADING_VEL:
+                self.angle_head = MLP([d_model, dcfg.MLP_DIM, dcfg.MLP_DIM // 2, self.m_K * self.motion_cfg.STEP])
+                self.vel_head = MLP([d_model, dcfg.MLP_DIM, dcfg.MLP_DIM // 2, self.m_K * self.m_dim])
 
     def _map_lane_encode(self, lane_inp):
         polyline = lane_inp[..., :4]
@@ -123,17 +155,26 @@ class DETRAgentQuery(nn.Module):
 
         motion_prob = self.motion_prob_head(agent_feat)
         result['motion_prob'] = motion_prob
-
-        motion_pred = self.motion_head(agent_feat).view(b, -1, self.m_K, pred_len, 2)
         
+        if self.with_type_embedding:
+            motion_pred = self.motion_head(agent_feat).view(b, -1, self.type_agents, self.m_K, pred_len, 2)
+        else:
+            motion_pred = self.motion_head(agent_feat).view(b, -1, self.m_K, pred_len, 2)
+        
+
         if self.motion_cfg.CUMSUM:
             motion_pred = motion_pred.cumsum(dim=-2)
         
         result['pred_motion'] = motion_pred
 
         if self.motion_cfg.PRED_HEADING_VEL:
-            future_heading_pred = self.angle_head(agent_feat).view(b, -1, self.m_K, pred_len, 1)
-            future_vel_pred = self.vel_head(agent_feat).view(b, -1, self.m_K, pred_len, 2)
+            if self.with_type_embedding:
+                future_heading_pred = self.angle_head(agent_feat).view(b, -1, self.type_agents, self.m_K, pred_len, 1)
+                future_vel_pred = self.vel_head(agent_feat).view(b, -1, self.type_agents, self.m_K, pred_len, 2)
+            else:
+                future_heading_pred = self.angle_head(agent_feat).view(b, -1, self.m_K, pred_len, 1)
+                future_vel_pred = self.vel_head(agent_feat).view(b, -1, self.m_K, pred_len, 2)
+
             if self.motion_cfg.CUMSUM:
                 future_heading_pred = future_heading_pred.cumsum(dim=-2)
             
@@ -162,25 +203,38 @@ class DETRAgentQuery(nn.Module):
 
             return distri
 
-    def _output_to_attrs(self, agent_feat):
+    def _output_to_attrs(self, agent_feat, veh_type = None):
         result = {}
         result['pred_speed'] = self.speed_head(agent_feat)
         result['pred_vel_heading'] = self.vel_heading_head(agent_feat)
+        veh_type = torch.clip(veh_type.to(torch.int64) - 1, min=0)
         
         if not self.use_attr_gmm:
-            result['pred_pos'] = self.pos_head(agent_feat)
-            result['pred_bbox'] = self.bbox_head(agent_feat)
-            result['pred_heading'] = self.heading_head(agent_feat)
+            if self.with_type_embedding:
+                pred_pos = self.pos_head(agent_feat).view([*agent_feat.shape[:-1], self.type_agents, -1])
+                pred_pos = torch.gather(pred_pos, 2, veh_type.unsqueeze(-1).expand(-1, -1, -1, 2))
+                result['pred_pos'] = pred_pos
+                
+                pred_bbx = self.bbox_head(agent_feat).view([*agent_feat.shape[:-1], self.type_agents, -1])
+                pred_bbx = torch.gather(pred_bbx, 2, veh_type.unsqueeze(-1).expand(-1, -1, -1, 2))
+                result['pred_bbox'] = pred_bbx
+                
+                pred_heading = self.heading_head(agent_feat).view([*agent_feat.shape[:-1], self.type_agents, -1])
+                pred_heading = torch.gather(pred_heading, 2, veh_type.unsqueeze(-1).expand(-1, -1, -1, 1))
+                result['pred_heading'] = pred_heading
         else:
             
-            pos_out = self.pos_head(agent_feat).view([*agent_feat.shape[:-1], self.attr_gmm_k, -1])
+            pos_out = self.pos_head(agent_feat).view([*agent_feat.shape[:-1], self.type_agents, self.attr_gmm_k, -1])
+            print(f"{pos_out.shape=}")
+            pos_out = pos_out[:, veh_type, :, :]
             pos_weight_logit = pos_out[..., 0]
             pos_param = pos_out[..., 1:]
             pos_distri = self._output_to_dist(pos_param, 2)
             pos_weight = torch.distributions.Categorical(logits=pos_weight_logit)
             result['pred_pos'] = (torch.distributions.mixture_same_family.MixtureSameFamily(pos_weight, pos_distri))
 
-            bbox_out = self.bbox_head(agent_feat).view([*agent_feat.shape[:-1], self.attr_gmm_k, -1])
+            bbox_out = self.bbox_head(agent_feat).view([*agent_feat.shape[:-1], self.type_agents, self.attr_gmm_k, -1])
+            print(f"{bbox_out.shape=}")
             bbox_weight_logit = bbox_out[..., 0]
             bbox_param = bbox_out[..., 1:]
 
@@ -188,7 +242,8 @@ class DETRAgentQuery(nn.Module):
             bbox_weight = torch.distributions.Categorical(logits=bbox_weight_logit)
             result['pred_bbox'] = (torch.distributions.mixture_same_family.MixtureSameFamily(bbox_weight, bbox_distri))
 
-            heading_out = self.heading_head(agent_feat).view([*agent_feat.shape[:-1], self.attr_gmm_k, -1])
+            heading_out = self.heading_head(agent_feat).view([*agent_feat.shape[:-1], self.type_agents, self.attr_gmm_k, -1])
+            print(f"{heading_out.shape=}")
             heading_weight_logit = heading_out[..., 0]
             heading_param = heading_out[..., 1:]
             heading_distri = self._output_to_dist(heading_param, 1)
@@ -202,6 +257,7 @@ class DETRAgentQuery(nn.Module):
         attr_cfg = self.model_cfg.ATTR_QUERY
         pos_enc_dim = attr_cfg.POS_ENCODING_DIM
         type_traj = data['traj_type']
+
         # Map Encoder
         b = data['lane_inp'].shape[0]
         device = data['lane_inp'].device
@@ -215,7 +271,14 @@ class DETRAgentQuery(nn.Module):
         attr_dim = attr_query_input.shape[-1]
         attr_query_encoding = pos2posemb(attr_query_input, pos_enc_dim//attr_dim)
 
-        attr_query_encoding = self.query_embedding_layer(attr_query_encoding)
+        if not self.with_type_embedding:
+            attr_query_encoding = self.query_embedding_layer(attr_query_encoding)
+        else:
+            attr_query_encoding = self.query_embedding_layer(attr_query_encoding)
+            agent_type_encoding = self.agent_type_embedding(data['veh_type'].float())
+            attr_query_encoding = torch.cat([attr_query_encoding, agent_type_encoding], dim=-1)
+
+
         learnable_query_embedding = self.actor_query.repeat(b, 1, 1)
         query_encoding = learnable_query_embedding + attr_query_encoding
 
@@ -225,6 +288,7 @@ class DETRAgentQuery(nn.Module):
         query_mask = self.query_mask_head(agent_feat)
         memory_mask = self.memory_mask_head(line_enc)
         
+        
         _, nei_query_input = data["nei_text"]
 
         nei_dim = nei_query_input.shape[-1]
@@ -233,6 +297,7 @@ class DETRAgentQuery(nn.Module):
         nei_feat = self.nei_decoder(tgt=nei_query_encoding, memory=line_enc, tgt_key_padding_mask=~data['agent_mask'], memory_key_padding_mask=~data['center_mask'])
         agent_feat = self.cross_attention(agent_feat, nei_feat, nei_feat)
         
+
         pred_logits = torch.einsum('bqk,bmk->bqm', query_mask, memory_mask)
         
         if self.use_background:
@@ -241,10 +306,12 @@ class DETRAgentQuery(nn.Module):
         
 
         # Attribute MLP
-        result = self._output_to_attrs(agent_feat)
+        result = self._output_to_attrs(agent_feat, data['veh_type'])
         result['pred_logits'] = pred_logits       
         # Motion MLP
         if self.motion_cfg.ENABLE:
             self._motion_predict(result, agent_feat)
             result['type_traj'] = type_traj
+            if self.with_type_embedding:
+                result['veh_type'] = data['veh_type']
         return result
