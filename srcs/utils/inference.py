@@ -11,7 +11,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.getcwd())))
 
 from srcs.configs.default import get_config
 from srcs.core.registry import registry
-from srcs.utils import load_all_map_vectors, output_formating_cot, map_retrival, get_map_data_batch, visualize_input_seq, visualize_output_seq
+from srcs.utils.utils import load_all_map_vectors, output_formating_cot, map_retrival, get_map_data_batch, visualize_input_seq, visualize_output_seq
 from srcs.typedef import *
 
 

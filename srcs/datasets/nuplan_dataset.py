@@ -5,8 +5,6 @@ import pickle
 import numpy as np
 from torch.utils.data import Dataset
 
-import dgl
-
 from srcs.utils.agent_process import WaymoAgent
 from srcs.utils.utils import process_map, rotate, cal_rel_dir
 from srcs.core.registry import registry
@@ -43,12 +41,27 @@ class NuplanDataset(Dataset):
         
         self.data_list_file = os.path.join(data_cfg.DATA_LIST.ROOT, data_cfg.DATA_LIST[mode.upper()])
         self.mode = mode
+        cities = ["pittsburgh", "boston", "singapore"]
         if self.mode == 'train':
-            self.data_path = data_cfg.DATA_PATH + 'processed/boston/'
+            dt_path = []
+            for city in cities:
+                dt_path.append(data_cfg.DATA_PATH + f'processed/{city}/')
+            
+            # self.data_path = data_cfg.DATA_PATH + 'processed/pittsburgh/'
+            self.data_path = dt_path
         else:
-            self.data_path = data_cfg.DATA_PATH + 'processed/test/'
+            self.data_path = [data_cfg.DATA_PATH + 'processed/test/']
 
-        self.summary_dict, self.summary_list, self.mapping = read_dataset_summary(self.data_path)
+        self.summary_dict = {}
+        self.summary_list = []
+        self.mapping = {}
+        for data_path in self.data_path:
+            a, b, c = read_dataset_summary(data_path)
+            self.summary_dict.update(a)
+            self.summary_list.extend(b)
+            self.mapping.update(c)
+        
+        #self.summary_dict, self.summary_list, self.mapping = read_dataset_summary(self.data_path)
 
         self.RANGE = data_cfg.RANGE
         self.MAX_AGENT_NUM = data_cfg.MAX_AGENT_NUM
@@ -73,6 +86,7 @@ class NuplanDataset(Dataset):
             self._load_cache_data()
 
     def __len__(self):
+        # return sum([len(_) for _ in self.summary_list])
         return len(self.summary_list)
     
     def __getitem__(self, index):
@@ -194,7 +208,15 @@ class NuplanDataset(Dataset):
             if "boston" in mapping:
                 _f = mapping.split("/")
                 mapping = _f[0] + "/" + _f[1] + "/" + "boston" + _f[2]
-            file_path = self.data_path + mapping + "/" + summary
+            
+            for city_path in self.data_path:
+                if summary in os.listdir(city_path + mapping):
+                    self.city = city_path.split("/")[-1]
+                    file_path = city_path + mapping + "/" + summary
+                    break
+
+
+            # file_path = self.data_path + mapping + "/" + summary
             self.summary = self.summary_dict[summary]
             init = time.time()
 
@@ -225,9 +247,9 @@ class NuplanDataset(Dataset):
             data["pred_num"] = data["num_veh"]
 
             if self.mode == 'train':
-                root_path = "/home/ubuntu/DATA2/nuplan/processed/pittsburgh_0/"
+                root_path = f"/home/ubuntu/DATA2/nuplan/processed/{self.city}_0/"
             else:
-                root_path = "/home/ubuntu/DATA2/nuplan/processed/test_0/"
+                root_path = f"/home/ubuntu/DATA2/nuplan/processed/test_0/"
 
             file_path = root_path + str(data['file'])
 
@@ -250,19 +272,27 @@ class NuplanDataset(Dataset):
         else:
             summary = self.summary_list[index]
             mapping = self.mapping[summary]
-            file_path = summary
+
+
             if self.mode == 'train':
-                cached_file_path = "/home/ubuntu/DATA2/nuplan/processed/boston_0/"
+                for city in ["pittsburgh", "boston", "singapore"]:
+                    cached_file_path = f"/home/ubuntu/DATA2/nuplan/processed/{city}_0/"
+                    if summary in os.listdir(cached_file_path):
+                        file_path = cached_file_path + summary
+                        self.city = city
+                        self.cached_data = os.listdir(cached_file_path)
+                        
+                        break
             else:
                 cached_file_path = "/home/ubuntu/DATA2/nuplan/processed/test_0/"
             
-            self.cached_data = os.listdir(cached_file_path)
+                self.cached_data = os.listdir(cached_file_path)
+
             self.file = summary
 
-            if summary not in self.cached_data:
-                summary = self.summary_list[0]
+            # if summary not in self.cached_data:
+            #     summary = self.summary_list[0]
             
-            file_path = cached_file_path + summary
             with open(file_path, 'rb') as f:
                 data = pickle.load(f)
                 f.close()
