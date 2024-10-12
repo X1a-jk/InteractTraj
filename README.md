@@ -2,7 +2,7 @@
 
 [**Language-Driven Interactive Traffic Trajectory Generation**](https://arxiv.org/pdf/2405.15388)   
 
-![overview](assets/figure1.png)
+![overview](assets/figure1.jpg)
 
 
 ## Environment setup
@@ -49,9 +49,16 @@ Modify the path of pre-trained model in srcs/configs/inference.py and the api_ke
 ````
 python srcs/utils/inference.py
 ````
+## TODO
+- [x] arxiv paper release
+- [x] code release
+- [ ] nuPlan dataset preprocess
+
 
 ## Related repositories
 We use code in [**TrafficGen**](https://github.com/metadriverse/trafficgen/) and [**LCTGen**](https://github.com/Ariostgx/lctgen). Many thanks to them for the selfless open source of the code and their previous work!
+
+
 
 ## Citation
 
