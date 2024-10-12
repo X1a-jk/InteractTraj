@@ -19,7 +19,6 @@ results/
 traj2act_new/
 vis/
 *.csv
-*.png
 *.css
 *.js
 map/
