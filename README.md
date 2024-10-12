@@ -2,7 +2,7 @@
 
 [**Language-Driven Interactive Traffic Trajectory Generation**](https://arxiv.org/pdf/2405.15388)   
 
-![overview](assets/figure1.jpg)
+![overview](assets/figure1.png)
 
 
 ## Environment setup
