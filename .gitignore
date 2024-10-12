@@ -20,6 +20,7 @@ traj2act_new/
 vis/
 *.csv
 *.png
-*.jpg
+*.css
+*.js
 map/
 map/*
