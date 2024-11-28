@@ -260,6 +260,46 @@ def visualize_input_seq(data, agents = None, traj=None, sort_agent=True, clip_si
     
   return draw_seq(0, center, agents, traj=traj, other=rest, edge=bound, save_np=True, save=save, path=filename)
 
+def visualize_input_batch(data, agents=None, traj=None, sort_agent=False, clip_size=True, save=False, filename=None):
+    batsize = data["agent_mask"].shape[0]
+    l = []
+    MIN_LENGTH = 0.2
+    MIN_WIDTH = 0.1
+    centers = data["center"].cpu().numpy()
+    rests = data["rest"].cpu().numpy()
+    bounds = data["bound"].cpu().numpy()
+
+    agent_masks = data["agent_mask"].cpu().numpy()
+    if agents is None:
+        agents = data["agent"].cpu().numpy()
+    if traj is None:
+        trajs = data['gt_pos'].cpu().numpy()
+
+    for j in range(batsize):
+        center = centers[j]
+        rest = rests[j]
+        bound = bounds[j]
+        agent_mask = agent_masks[j]
+        agent = agents[j]
+
+        agent_waymo = [WaymoAgent(agent[i:i+1]) for i in range(agent.shape[0]) if agent_mask[i]]
+        traj = trajs[j][:, agent_mask]
+
+        if sort_agent:
+            agent_dists = [np.linalg.norm(agent.position) for agent in agent_waymo]
+            agent_idx = np.argsort(agent_dists)
+            agent_waymo = [agent_waymo[i] for i in agent_idx]
+            traj = traj[:, agent_idx]
+
+        if clip_size:
+            for i in range(len(agent_waymo)):
+                agent_waymo[i].length_width = np.clip(agent_waymo[i].length_width, [MIN_LENGTH, MIN_WIDTH], [10.0, 5.0])
+
+        plt = draw_seq(0, center, agent_waymo, traj=traj, other=rest, edge=bound, save_np=True, save=save, path = filename)
+        l.append(plt)
+
+    return l[0] if batsize == 1 else l
+
 def transform_traj_output_to_waymo_agent(output, fps=10):
   STOP_SPEED = 1.0
   init_agent = output['agent']

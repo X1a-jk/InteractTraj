@@ -16,10 +16,92 @@ import copy
 import matplotlib.pyplot as plt
 import numpy as np
 import os
-from srcs.models.neighbor_fuse import _get_inter_type
+from srcs.models.neighbor_fuse import _get_inter_type, _get_inter_type_batch
+import random
 
 
-def generate_prompt(data):
+def generate_prompt_batch(data):# may need to adapt to evaluate step
+    traj_type,interactions = _get_inter_type_batch(data)
+    bz = data['traj_type'].shape[0]
+    res = []
+    #print(data['traj_type'])
+    
+    behaviour_templates = {
+        "overtake": [
+            "{actor2} overtakes {actor1} while changing lanes.",
+            "{actor2} speeds up and passes {actor1}.",
+            "{actor2} moves ahead, overtaking {actor1} swiftly."
+        ],
+        "yield": [
+            "{actor2} slows down to let {actor1} pass.",
+            "{actor2} yields the road to {actor1}.",
+            "{actor2} gives way to {actor1}, allowing them to proceed first."
+        ],
+        "follow": [
+            "{actor2} is following closely behind {actor1}.",
+            "{actor2} keeps a steady distance behind {actor1}.",
+            "{actor2} follows {actor1}, maintaining its position in the same lane."
+        ],
+        "jam": [
+            "There is a heavy traffic jam, with vehicles stuck in place.",
+            "The road is blocked due to a traffic jam.",
+            "Traffic is congested, causing a significant jam."
+        ]
+    }
+    
+    trajectory_templates = {
+        0: ["comes to a stop.", "halts completely.", "is stuck."],
+        1: ["continues driving straight ahead.", "moves forward steadily in a straight path.", "proceeds straight."],
+        2: ["executes a left turn, changing direction.", "makes a smooth left turn, adjusting its course.", "turns left."],
+        3: ["executes a right turn, changing direction.", "makes a smooth right turn, adjusting its course.", "turns right."],
+        4: ["performs a left lane change.", "shifts to the left lane.", "switches to the left lane, altering its position."],
+        5: ["performs a right lane change.", "shifts to the right lane.", "switches to the right lane, altering its position."]
+    }
+
+    templates = [
+        "In this scenario, there are {num_vehicle} agents. {description}",
+        "{num_vehicle} agents are present. {description}",
+        "{num_vehicle} agents are involved, and {description}"
+    ]
+    
+    for j in range(bz):
+        #print(data['traj_type'])
+        #print(data['traj_type'].shape)
+        #print(data['agent_mask'])
+        #print(data['agent_mask'].shape)
+        #traj_type = data['traj_type'][data['agent_mask'],j].tolist()
+        #print(traj_type)
+        #veh_type = data['veh_type'][:, data['agent_mask'][j], :].int().tolist()[j]
+        num_vehicle = len(traj_type[j])
+        # print(num_vehicle)
+        agent_type = ["Agent", "Vehicle", "Pedestrian", "Bicycle"]  
+        description = ""
+        
+
+        for i in range(num_vehicle):
+            traj_idx = traj_type[j][i]
+            if traj_idx != -1:
+                trajectory_desc = random.choice(trajectory_templates[traj_type[j][i]])
+                #print(trajectory_desc)
+                description += f"Agent {i} {trajectory_desc}"
+
+
+        for behaviour, participants in interactions[j].items():
+            if behaviour == "jam" and participants != []:
+                behaviour_desc = random.choice(behaviour_templates[behaviour])
+                description += behaviour_desc
+            else:
+                if len(participants) > 0:
+                    for actor_1, actor_2 in participants:
+                        behaviour_desc = random.choice(behaviour_templates[behaviour])
+                        description += behaviour_desc.format(actor1=f"Agent {actor_1}", actor2=f"Agent {actor_2}")
+
+        template = random.choice(templates)
+        prompt = template.format(num_vehicle=num_vehicle, description=description.strip())
+        res.append(prompt)
+    return res 
+
+def generate_prompt(data): #capable to generate single prompt not batch
     interactions = _get_inter_type(data)
     bz = data['traj_type'].shape[0]
     res = []
@@ -89,7 +171,7 @@ if __name__ == "__main__":
         file_id = batch['file'][0].split(".")[1]
         
         prompt = generate_prompt(data)
-
+        print(len(prompt))
         if data["num_veh"].cpu().int().item() >= 0:
             # print(f'{data["agent_mask"].sum()=}')
             file_name = "./nuplan_vis/" + file_id+'.png'
