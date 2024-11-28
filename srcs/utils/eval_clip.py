@@ -436,12 +436,8 @@ if __name__ == "__main__":
     inter_cfg = "/home/ubuntu/xiajunkai/lctgen/cfgs/inference.yaml"
     clip_ckpt = "/home/ubuntu/gujiahao/lctgen/best_clip_model_1107.pth"
 
-    #openai.api_key = "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"
-    #openai.base_url = "https://integrate.api.nvidia.com/v1/"
-
-    openai.api_key = "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"
-    openai.base_url = "https://api.openai-proxy.com/v1/"
-
+    #openai.api_key = # 
+    #openai.base_url = # 
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
  
